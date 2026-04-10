@@ -1563,6 +1563,42 @@ describe('useInfiniteQuery', () => {
     expect(wrapper.vm.hasNextPage).toBe(true)
   })
 
+  it('does not crash when setQueryData creates entry before useInfiniteQuery', async () => {
+    // Reproduction: external code (e.g. an optimistic mutation on a different
+    // page) calls queryCache.setQueryData() with an InfiniteData-shaped value
+    // BEFORE useInfiniteQuery() has ever been called for that key.
+    //
+    // setQueryData → ensureEntry → extend action fires, but
+    // PiniaColadaInfiniteQueryPlugin isn't registered yet (it's registered
+    // inside useInfiniteQuery), so the ext refs (nextPageParam, etc.) are
+    // never created.
+    //
+    // Later when useInfiniteQuery() mounts, ensureEntry finds the existing
+    // entry → no extend action → ext refs stay undefined →
+    // computePageParams crashes with:
+    //   TypeError: Cannot set properties of undefined (setting 'value')
+    const pinia = createPinia()
+    const app = createApp({ render: () => null })
+    app.use(pinia)
+    app.use(PiniaColada)
+    const queryCache = useQueryCache(pinia)
+
+    // Pre-populate before any useInfiniteQuery call
+    queryCache.setQueryData(['key'], {
+      pages: [[1, 2, 3]],
+      pageParams: [0],
+    })
+
+    const { wrapper } = mountSimple({ staleTime: 1000 }, { plugins: [pinia] })
+    await flushPromises()
+
+    expect(wrapper.vm.data).toEqual({
+      pages: [[1, 2, 3]],
+      pageParams: [0],
+    })
+    expect(wrapper.vm.hasNextPage).toBe(true)
+  })
+
   it('works after unmounting and remounting with the same pinia instance', async () => {
     const pinia = createPinia()
     const plugins = [pinia] as NonNullable<GlobalMountOptions>['plugins']
